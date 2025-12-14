@@ -33,6 +33,7 @@ output/*.csv
 # Modèles téléchargés
 models/
 .cache/
+*.npy
 
 # IDE
 .vscode/

@@ -25,24 +25,71 @@ class LLMGenerator:
         """Charge le modèle avec MLX (Apple Silicon)"""
         try:
             from mlx_lm import load, generate
+            from transformers import AutoTokenizer
             
-            # Chercher d'abord une version MLX pré-convertie
+            # Si le modèle commence déjà par mlx-community/, le charger directement
             mlx_model_name = config.llm_model
             
-            # Si le modèle n'est pas sur mlx-community, essayer de charger l'original
-            # MLX peut convertir à la volée (mais c'est plus lent au premier lancement)
-            try:
-                self.model, self.tokenizer = load(
-                    f"mlx-community/{mlx_model_name.split('/')[-1]}",
-                    tokenizer_config={"trust_remote_code": True}
-                )
-                print(f"✅ Modèle MLX pré-converti trouvé")
-            except:
-                print(f"⚠️  Version MLX non trouvée, conversion du modèle original...")
-                self.model, self.tokenizer = load(
-                    mlx_model_name,
-                    tokenizer_config={"trust_remote_code": True, "token": config.hf_token}
-                )
+            if mlx_model_name.startswith("mlx-community/"):
+                print(f"🔍 Chargement du modèle MLX: {mlx_model_name}")
+                try:
+                    self.model, self.tokenizer = load(
+                        mlx_model_name,
+                        tokenizer_config={"trust_remote_code": True}
+                    )
+                    print(f"✅ Modèle MLX chargé")
+                    self.generate_fn = generate
+                    return
+                except Exception as e:
+                    print(f"❌ Erreur de chargement: {e}")
+                    raise
+            
+            # Sinon, essayer de trouver une version MLX pré-convertie
+            model_name_short = mlx_model_name.split('/')[-1]
+            
+            # Essayer les versions quantifiées en premier (plus légères)
+            mlx_versions = [
+                f"mlx-community/{model_name_short}-4bit",
+                f"mlx-community/{model_name_short}-8bit",
+                f"mlx-community/{model_name_short}"
+            ]
+            
+            print(f"🔍 Recherche d'une version MLX optimisée...")
+            
+            for mlx_version in mlx_versions:
+                try:
+                    print(f"   → Test: {mlx_version}")
+                    # Test rapide de l'existence du modèle
+                    from huggingface_hub import model_info
+                    model_info(mlx_version, token=config.hf_token)
+                    
+                    # Si on arrive ici, le modèle existe, on le charge
+                    print(f"✅ Modèle trouvé, chargement en cours...")
+                    self.model, self.tokenizer = load(
+                        mlx_version,
+                        tokenizer_config={"trust_remote_code": True}
+                    )
+                    print(f"✅ Modèle chargé: {mlx_version}")
+                    self.generate_fn = generate
+                    return
+                except Exception:
+                    continue
+            
+            print(f"⚠️  Aucune version MLX pré-convertie trouvée")
+            print(f"\n💡 Solutions alternatives:")
+            print(f"   1. Choisissez un modèle MLX pré-converti disponible:")
+            print(f"      • mlx-community/Mistral-7B-Instruct-v0.3-4bit")
+            print(f"      • mlx-community/Llama-3.2-3B-Instruct-4bit")
+            print(f"      • mlx-community/Qwen2.5-7B-Instruct-4bit")
+            print(f"\n   2. Modifiez votre .env:")
+            print(f"      LLM_MODEL=mlx-community/Mistral-7B-Instruct-v0.3-4bit")
+            print(f"\n   3. Consultez les modèles disponibles:")
+            print(f"      https://huggingface.co/mlx-community")
+            
+            raise ValueError(
+                f"Aucun modèle MLX compatible trouvé pour {mlx_model_name}. "
+                f"Utilisez un modèle mlx-community/ dans votre .env"
+            )
             
             self.generate_fn = generate
             
