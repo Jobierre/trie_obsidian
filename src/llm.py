@@ -155,12 +155,12 @@ class LLMGenerator:
     
     def _generate_mlx(self, prompt: str, max_tokens: int, temperature: float) -> str:
         """Génération avec MLX"""
+        # mlx_lm.generate retourne directement le texte complet
         response = self.generate_fn(
             self.model,
             self.tokenizer,
             prompt=prompt,
             max_tokens=max_tokens,
-            temp=temperature,
             verbose=False
         )
         return response
