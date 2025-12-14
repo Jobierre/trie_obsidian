@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+*.egg-info/
+dist/
+build/
+
+# Environnement
+.env
+
+# Notes Obsidian (ne pas commiter les notes personnelles)
+notes/**/*.md
+notes/**/*.pdf
+notes/**/*.png
+notes/**/*.jpg
+notes/**/*.jpeg
+
+# Garder la structure
+!notes/.gitkeep
+
+# Outputs
+output/*.json
+output/*.md
+output/*.csv
+
+# Modèles téléchargés
+models/
+.cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
