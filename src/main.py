@@ -2,42 +2,67 @@
 Script principal d'orchestration
 """
 import argparse
+import random
 from pathlib import Path
 
 from .config import config
 from .frontmatter_manager import FrontmatterManager
-from .embeddings import EmbeddingGenerator
-from .clustering import NoteClustering
 from .llm import LLMGenerator
-from .categorizer import ClusterCategorizer
+from .categorizer import NoteClassifier
+from .category_manager import CategoryManager
 from .dry_run import DryRunManager
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="🗂️  Obsidian Organizer - Classement automatique de notes avec IA"
-    )
-    parser.add_argument(
-        '--apply',
-        action='store_true',
-        help='Applique les changements (par défaut: dry-run)'
-    )
-    parser.add_argument(
-        '--skip-embeddings',
-        action='store_true',
-        help='Réutilise les embeddings existants (dans output/embeddings.npy)'
-    )
-    parser.add_argument(
-        '--report-format',
-        choices=['markdown', 'json', 'both'],
-        default='markdown',
-        help='Format du rapport de dry-run'
-    )
-    
-    args = parser.parse_args()
-    
+def discover_mode(llm: LLMGenerator, documents: list, count: int):
+    """Mode découverte: analyse les notes et propose des catégories"""
     print("\n" + "=" * 60)
-    print("🗂️  OBSIDIAN ORGANIZER")
+    print("🔍 MODE DÉCOUVERTE DES CATÉGORIES")
+    print("=" * 60)
+    print(f"Analyse de {len(documents)} notes pour proposer {count} catégories...\n")
+    
+    # Prendre un échantillon représentatif (50 notes aléatoires max)
+    sample_size = min(50, len(documents))
+    sample = random.sample(documents, sample_size)
+    
+    # Préparer les données pour le LLM
+    sample_data = []
+    for doc in sample:
+        title = doc['path'].stem if hasattr(doc['path'], 'stem') else str(doc['path']).split('/')[-1].replace('.md', '')
+        sample_data.append({
+            'title': title,
+            'content': doc['content']
+        })
+    
+    print(f"📊 Échantillon: {sample_size} notes analysées")
+    print("🤖 Génération des catégories...")
+    
+    # Demander au LLM de proposer des catégories
+    categories = llm.discover_categories(sample_data, count=count)
+    
+    print(f"\n✅ {len(categories)} catégories proposées:\n")
+    for i, cat in enumerate(categories, 1):
+        print(f"{i}. {cat['name']}")
+        print(f"   {cat['description']}\n")
+    
+    # Sauvegarder dans categories.yaml
+    cat_manager = CategoryManager()
+    cat_manager.save_categories(categories)
+    
+    print("=" * 60)
+    print("✨ DÉCOUVERTE TERMINÉE")
+    print("=" * 60)
+    print(f"Fichier généré: categories.yaml")
+    print("\n💡 Prochaines étapes:")
+    print("   1. Éditez categories.yaml pour ajuster les catégories")
+    print("   2. Relancez: python -m src.main")
+    print("   3. Vérifiez le rapport de classification")
+    print("   4. Appliquez: python -m src.main --apply\n")
+
+
+def classify_mode(args):
+    """Mode classification: classe les notes dans des catégories prédéfinies"""
+    print("\n" + "=" * 60)
+    print("🗂️  OBSIDIAN ORGANIZER - CLASSIFICATION")
     print("=" * 60)
     
     if args.apply:
@@ -53,7 +78,7 @@ def main():
     
     # Étape 1: Scanner le vault
     print("=" * 60)
-    print("ÉTAPE 1/6: Scan du vault")
+    print("ÉTAPE 1/4: Scan du vault")
     print("=" * 60)
     
     documents = FrontmatterManager.scan_vault(config.vault_path)
@@ -63,64 +88,33 @@ def main():
         print(f"   {config.vault_path}")
         return
     
-    # Étape 2: Générer les embeddings
+    # Étape 2: Charger les catégories
     print("=" * 60)
-    print("ÉTAPE 2/6: Génération des embeddings")
-    print("=" * 60)
-    
-    embeddings_path = config.output_dir / "embeddings.npy"
-    
-    if args.skip_embeddings and embeddings_path.exists():
-        print(f"⏩ Réutilisation des embeddings existants: {embeddings_path}")
-        embedding_gen = EmbeddingGenerator()
-        embeddings = embedding_gen.load_embeddings(embeddings_path)
-    else:
-        embedding_gen = EmbeddingGenerator()
-        embeddings = embedding_gen.generate_embeddings(documents)
-        embedding_gen.save_embeddings(embeddings, embeddings_path)
-    
-    # Étape 3: Clustering
-    print("\n" + "=" * 60)
-    print("ÉTAPE 3/6: Clustering des notes")
+    print("ÉTAPE 2/4: Chargement des catégories")
     print("=" * 60)
     
-    clusterer = NoteClustering()
-    labels, stats = clusterer.cluster_notes(embeddings)
+    cat_manager = CategoryManager()
+    try:
+        categories = cat_manager.load_categories()
+    except FileNotFoundError as e:
+        print(str(e))
+        print("\n💡 Lancez d'abord la découverte:")
+        print("   python -m src.main --discover")
+        return
     
-    # Extraire des échantillons
-    cluster_samples = clusterer.get_cluster_samples(
-        documents, 
-        labels, 
-        n_samples=config.llm_samples_per_cluster
-    )
-    
-    unclustered_notes = clusterer.get_unclustered_notes(documents, labels)
-    
-    # Étape 4: Charger le LLM
-    print("\n" + "=" * 60)
-    print("ÉTAPE 4/6: Chargement du LLM")
+    # Étape 3: Charger le LLM et classifier
+    print("=" * 60)
+    print("ÉTAPE 3/4: Classification des notes")
     print("=" * 60)
     
     llm = LLMGenerator()
+    classifier = NoteClassifier(llm, use_cache=not args.clear_cache)
     
-    # Étape 5: Catégorisation
-    print("\n" + "=" * 60)
-    print("ÉTAPE 5/6: Génération des catégories")
+    note_to_category = classifier.classify_notes(documents, categories)
+    
+    # Étape 4: Appliquer les changements (ou dry-run)
     print("=" * 60)
-    
-    categorizer = ClusterCategorizer(llm)
-    categories = categorizer.categorize_clusters(cluster_samples)
-    
-    # Mapper toutes les notes vers leur catégorie
-    note_to_category = categorizer.map_notes_to_categories(
-        documents, 
-        labels, 
-        categories
-    )
-    
-    # Étape 6: Appliquer les changements (ou dry-run)
-    print("\n" + "=" * 60)
-    print("ÉTAPE 6/6: Application des changements")
+    print("ÉTAPE 4/4: Application des changements")
     print("=" * 60)
     
     dry_run_manager = DryRunManager()
@@ -163,5 +157,61 @@ def main():
     print("=" * 60 + "\n")
 
 
+def main():
+    parser = argparse.ArgumentParser(
+        description="🗂️  Obsidian Organizer - Classement automatique de notes avec IA"
+    )
+    
+    # Mode découverte
+    parser.add_argument(
+        '--discover',
+        action='store_true',
+        help='Mode découverte: analyse les notes et propose des catégories'
+    )
+    parser.add_argument(
+        '--count',
+        type=int,
+        default=8,
+        help='Nombre de catégories à découvrir (défaut: 8)'
+    )
+    
+    # Mode classification
+    parser.add_argument(
+        '--apply',
+        action='store_true',
+        help='Applique les changements (par défaut: dry-run)'
+    )
+    parser.add_argument(
+        '--clear-cache',
+        action='store_true',
+        help='Efface le cache et reclassifie toutes les notes'
+    )
+    parser.add_argument(
+        '--report-format',
+        choices=['markdown', 'json', 'both'],
+        default='markdown',
+        help='Format du rapport de dry-run'
+    )
+    
+    args = parser.parse_args()
+    
+    # Scanner le vault dans tous les cas
+    documents = FrontmatterManager.scan_vault(config.vault_path)
+    
+    if len(documents) == 0:
+        print("❌ Aucune note trouvée. Copiez vos notes .md dans:")
+        print(f"   {config.vault_path}")
+        return
+    
+    # Mode découverte
+    if args.discover:
+        llm = LLMGenerator()
+        discover_mode(llm, documents, args.count)
+    else:
+        # Mode classification normale
+        classify_mode(args)
+
+
 if __name__ == "__main__":
     main()
+

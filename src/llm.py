@@ -250,3 +250,158 @@ RÉPONSE:[/INST]"""
             category = category[:50].rsplit(' ', 1)[0]
         
         return category
+    
+    def discover_categories(self, sample_notes: List[Dict[str, str]], count: int = 8) -> List[Dict[str, str]]:
+        """
+        Analyse un échantillon de notes et propose des catégories globales.
+        
+        Args:
+            sample_notes: Liste de dicts avec 'title' et 'content' (échantillon représentatif)
+            count: Nombre de catégories à proposer
+        
+        Returns:
+            Liste de dicts avec 'name' et 'description'
+        """
+        # Préparer un résumé des notes
+        notes_summary = "\n\n".join([
+            f"- {note['title']}: {note['content'][:200]}..."
+            for note in sample_notes[:30]  # Max 30 notes pour le prompt
+        ])
+        
+        prompt = f"""<s>[INST] Tu es un expert en organisation de connaissances (PKM).
+
+MISSION: Analyse ces notes Obsidian et propose {count} CATÉGORIES PRINCIPALES pour organiser tout le vault.
+
+ÉCHANTILLON DE NOTES ({len(sample_notes[:30])} notes):
+{notes_summary}
+
+RÈGLES:
+1. Propose {count} catégories qui couvrent les THÈMES PRINCIPAUX
+2. Format: "Domaine - Sous-thème" (ex: "Tech - Infrastructure", "Dev - Python")
+3. Chaque catégorie doit avoir:
+   - Un nom court et descriptif (2-4 mots)
+   - Une description claire (1 phrase)
+4. Ajoute toujours "Divers" en dernière catégorie
+
+EXEMPLES:
+Tech - Backup: Sauvegarde de données, outils comme Plakar, S3, rsync
+Dev - Programmation: Code, langages, frameworks, tutoriels
+Maison - Travaux: Rénovation, bricolage, matériaux, achats
+Finance: Investissement, trading, comptabilité
+
+RÉPONDS AU FORMAT JSON UNIQUEMENT:
+[
+  {{"name": "Tech - Infrastructure", "description": "..."}},
+  {{"name": "Dev - Programmation", "description": "..."}},
+  ...
+][/INST]"""
+        
+        # Générer avec plus de tokens pour avoir toutes les catégories
+        response = self.generate(prompt, max_tokens=500, temperature=0.3)
+        
+        # Parser le JSON
+        import json
+        try:
+            # Extraire le JSON (parfois le LLM ajoute du texte avant/après)
+            json_start = response.find('[')
+            json_end = response.rfind(']') + 1
+            if json_start >= 0 and json_end > json_start:
+                json_str = response[json_start:json_end]
+                categories = json.loads(json_str)
+                
+                # Valider la structure
+                if isinstance(categories, list) and all('name' in c and 'description' in c for c in categories):
+                    return categories
+        except Exception as e:
+            print(f"⚠️  Erreur parsing JSON: {e}")
+        
+        # Fallback: parser manuellement
+        print("⚠️  Format JSON invalide, parsing manuel...")
+        categories = []
+        lines = response.split('\n')
+        current_cat = {}
+        
+        for line in lines:
+            line = line.strip()
+            if line.startswith('-') or line.startswith('•'):
+                # Ligne de catégorie
+                if ':' in line:
+                    parts = line.split(':', 1)
+                    name = parts[0].strip('- •').strip()
+                    desc = parts[1].strip()
+                    categories.append({'name': name, 'description': desc})
+        
+        if not categories:
+            print("❌ Impossible de parser les catégories, utilisation des catégories par défaut")
+            from .category_manager import CategoryManager
+            return CategoryManager().create_default_categories()
+        
+        return categories
+    
+    def choose_category(
+        self, 
+        note_title: str, 
+        note_content: str, 
+        available_categories: List[Dict[str, str]]
+    ) -> str:
+        """
+        Choisit la meilleure catégorie pour une note parmi une liste prédéfinie.
+        
+        Args:
+            note_title: Titre de la note
+            note_content: Contenu de la note
+            available_categories: Liste des catégories disponibles
+        
+        Returns:
+            Nom exact de la catégorie choisie
+        """
+        # Construire la liste des catégories pour le prompt
+        categories_text = "\n".join([
+            f"{i+1}. {cat['name']}: {cat['description']}"
+            for i, cat in enumerate(available_categories)
+        ])
+        
+        # Limiter le contenu
+        content_excerpt = note_content[:800]
+        
+        prompt = f"""<s>[INST] Classe cette note Obsidian dans UNE catégorie.
+
+NOTE:
+Titre: {note_title}
+Contenu: {content_excerpt}
+
+CATÉGORIES DISPONIBLES:
+{categories_text}
+
+RÈGLES:
+1. Choisis la catégorie LA PLUS PERTINENTE
+2. Réponds UNIQUEMENT avec le nom exact de la catégorie
+3. Si vraiment aucune ne convient, choisis "Divers"
+
+Catégorie:[/INST]"""
+        
+        response = self.generate(prompt, max_tokens=20, temperature=0.1)
+        
+        # Nettoyer la réponse
+        category = response.strip().strip('"').strip("'").strip()
+        
+        # Prendre la première ligne
+        category = category.split('\n')[0].strip()
+        
+        # Enlever numérotation si présente (ex: "1. Tech - Backup" → "Tech - Backup")
+        if category and category[0].isdigit():
+            category = category.split('.', 1)[-1].strip()
+        
+        # Vérifier que la catégorie existe
+        category_names = [cat['name'] for cat in available_categories]
+        
+        if category not in category_names:
+            # Essayer de trouver une correspondance partielle
+            for cat_name in category_names:
+                if cat_name.lower() in category.lower() or category.lower() in cat_name.lower():
+                    return cat_name
+            # Fallback sur Divers
+            return "Divers" if "Divers" in category_names else category_names[0]
+        
+        return category
+
