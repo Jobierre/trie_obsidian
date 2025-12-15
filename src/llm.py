@@ -194,29 +194,55 @@ class LLMGenerator:
             sample_notes: Liste de contenus de notes représentatives du cluster
         
         Returns:
-            Nom de catégorie proposé (ex: "Tech - Machine Learning")
+            Nom de catégorie proposé (ex: "Tech - Python")
         """
-        # Construire le prompt
-        samples_text = "\n\n---\n\n".join([f"Note {i+1}:\n{note[:500]}" for i, note in enumerate(sample_notes)])
+        # Construire le prompt avec plus de contenu (800 chars au lieu de 500)
+        samples_text = "\n\n---\n\n".join([f"Note {i+1}:\n{note[:800]}" for i, note in enumerate(sample_notes)])
         
-        prompt = f"""<s>[INST] Tu es un assistant qui aide à organiser des notes Obsidian.
+        prompt = f"""<s>[INST] Tu es un expert en organisation de notes. Analyse ces {len(sample_notes)} notes et trouve leur thème commun.
 
-Voici {len(sample_notes)} notes similaires. Analyse leur contenu et propose UN SEUL nom de catégorie descriptif et concis (maximum 3 mots).
+RÈGLES STRICTES:
+1. Réponds UNIQUEMENT avec le nom de catégorie, sans explication
+2. Format obligatoire: "Domaine - Sous-thème" (2-4 mots maximum)
+3. Soit PRÉCIS et SPÉCIFIQUE au contenu réel des notes
+4. Utilise le MÊME vocabulaire que les notes (pas de généralisation excessive)
 
-Format attendu: "Domaine - Sous-thème" (ex: "Tech - Python", "Santé - Nutrition", "Citations - Philosophie")
+EXEMPLES DE BONNES CATÉGORIES:
+- "Dev - Python Django"
+- "Finance - Trading"
+- "Maison - Travaux SDB"
+- "Tech - Backup Plakar"
+- "Admin - Configuration LXC"
+- "Perso - Rendez-vous"
 
-Notes:
+EXEMPLES DE MAUVAISES CATÉGORIES:
+- "Systems - Configuration" (trop vague)
+- "Development Tools" (pas de sous-thème)
+- "Alimentation - Boissons" (hors sujet si pas dans les notes)
+
+NOTES À ANALYSER:
 {samples_text}
 
-Nom de catégorie: [/INST]"""
+Nom de catégorie précis: [/INST]"""
         
         # Générer la réponse
-        category = self.generate(prompt, max_tokens=50, temperature=0.3)
+        category = self.generate(prompt, max_tokens=20, temperature=0.1)
         
-        # Nettoyer la réponse (enlever les sauts de ligne, etc.)
-        category = category.strip().split('\n')[0].strip()
+        # Nettoyer la réponse aggressivement
+        category = category.strip()
         
-        # Enlever les guillemets si présents
-        category = category.strip('"').strip("'")
+        # Prendre seulement la première ligne
+        category = category.split('\n')[0].strip()
+        
+        # Enlever guillemets, tirets en début, points, etc.
+        category = category.strip('"').strip("'").strip('- ').strip('.').strip()
+        
+        # Si contient "Catégorie:", "Nom:", etc., extraire juste après
+        if ':' in category:
+            category = category.split(':', 1)[1].strip()
+        
+        # Limiter à 50 caractères max
+        if len(category) > 50:
+            category = category[:50].rsplit(' ', 1)[0]
         
         return category
