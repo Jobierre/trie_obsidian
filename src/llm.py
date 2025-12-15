@@ -297,46 +297,82 @@ RÉPONDS AU FORMAT JSON UNIQUEMENT:
 ][/INST]"""
         
         # Générer avec plus de tokens pour avoir toutes les catégories
-        response = self.generate(prompt, max_tokens=500, temperature=0.3)
+        response = self.generate(prompt, max_tokens=800, temperature=0.3)
+        
+        print(f"🔍 Réponse LLM ({len(response)} caractères)")
         
         # Parser le JSON
         import json
+        import re
+        
         try:
-            # Extraire le JSON (parfois le LLM ajoute du texte avant/après)
+            # Méthode 1: Extraire le JSON entre crochets
             json_start = response.find('[')
             json_end = response.rfind(']') + 1
             if json_start >= 0 and json_end > json_start:
                 json_str = response[json_start:json_end]
+                
+                # Nettoyer le JSON (enlever les virgules traînantes, etc.)
+                json_str = re.sub(r',\s*]', ']', json_str)  # Fix trailing comma
+                json_str = re.sub(r',\s*}', '}', json_str)  # Fix trailing comma in objects
+                
                 categories = json.loads(json_str)
                 
                 # Valider la structure
-                if isinstance(categories, list) and all('name' in c and 'description' in c for c in categories):
-                    return categories
+                if isinstance(categories, list) and len(categories) > 0:
+                    valid_cats = []
+                    for c in categories:
+                        if isinstance(c, dict) and 'name' in c:
+                            valid_cats.append({
+                                'name': c.get('name', '').strip(),
+                                'description': c.get('description', '').strip()
+                            })
+                    if valid_cats:
+                        print(f"✅ {len(valid_cats)} catégories parsées avec succès")
+                        return valid_cats
+        except json.JSONDecodeError as e:
+            print(f"⚠️  Erreur JSON: {e}")
         except Exception as e:
-            print(f"⚠️  Erreur parsing JSON: {e}")
+            print(f"⚠️  Erreur parsing: {e}")
         
-        # Fallback: parser manuellement
-        print("⚠️  Format JSON invalide, parsing manuel...")
+        # Méthode 2: Regex pour extraire les catégories
+        print("⚠️  JSON invalide, extraction par regex...")
         categories = []
-        lines = response.split('\n')
-        current_cat = {}
         
-        for line in lines:
+        # Pattern pour trouver "name": "..." et "description": "..."
+        pattern = r'"name"\s*:\s*"([^"]+)".*?"description"\s*:\s*"([^"]+)"'
+        matches = re.findall(pattern, response, re.DOTALL)
+        
+        for name, desc in matches:
+            categories.append({'name': name.strip(), 'description': desc.strip()})
+        
+        if categories:
+            print(f"✅ {len(categories)} catégories extraites par regex")
+            return categories
+        
+        # Méthode 3: Fallback - parser ligne par ligne
+        print("⚠️  Regex échoué, parsing ligne par ligne...")
+        for line in response.split('\n'):
             line = line.strip()
-            if line.startswith('-') or line.startswith('•'):
-                # Ligne de catégorie
-                if ':' in line:
-                    parts = line.split(':', 1)
-                    name = parts[0].strip('- •').strip()
-                    desc = parts[1].strip()
-                    categories.append({'name': name, 'description': desc})
+            # Pattern: "Catégorie: description" ou "- Catégorie: description"
+            if ':' in line and len(line) > 5:
+                clean = line.lstrip('- •*"\'{[')
+                if clean.startswith('name') or clean.startswith('description'):
+                    continue
+                parts = clean.split(':', 1)
+                if len(parts) == 2:
+                    name = parts[0].strip().strip('"\'')
+                    desc = parts[1].strip().strip('"\']},.')
+                    if name and len(name) < 50:
+                        categories.append({'name': name, 'description': desc})
         
-        if not categories:
-            print("❌ Impossible de parser les catégories, utilisation des catégories par défaut")
-            from .category_manager import CategoryManager
-            return CategoryManager().create_default_categories()
+        if categories:
+            print(f"✅ {len(categories)} catégories extraites manuellement")
+            return categories
         
-        return categories
+        print("❌ Impossible de parser les catégories, utilisation des catégories par défaut")
+        from .category_manager import CategoryManager
+        return CategoryManager().create_default_categories()
     
     def choose_category(
         self, 

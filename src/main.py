@@ -18,7 +18,8 @@ def discover_mode(llm: LLMGenerator, documents: list, count: int, sample_size: i
     print("\n" + "=" * 60)
     print("🔍 MODE DÉCOUVERTE DES CATÉGORIES")
     print("=" * 60)
-    print(f"Analyse de {len(documents)} notes pour proposer {count} catégories...\n")
+    print(f"📊 Vault: {len(documents)} notes")
+    print(f"🎯 Objectif: proposer {count} catégories\n")
     
     # Prendre un échantillon représentatif
     sample_size = min(sample_size, len(documents))
