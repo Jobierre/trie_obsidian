@@ -33,16 +33,25 @@ class ClusterCategorizer:
         categories = {}
         
         for cluster_id, samples in tqdm(cluster_samples.items(), desc="Catégorisation"):
-            # Extraire juste le contenu des notes
-            sample_contents = [doc['content'] for doc in samples]
+            # Extraire titre + contenu pour le LLM
+            sample_data = []
+            for doc in samples:
+                # Extraire le titre du chemin (nom de fichier sans .md)
+                title = doc['path'].stem if hasattr(doc['path'], 'stem') else str(doc['path']).split('/')[-1].replace('.md', '')
+                sample_data.append({
+                    'title': title,
+                    'content': doc['content']
+                })
             
             # Demander au LLM de générer un nom de catégorie
-            category_name = self.llm.categorize_cluster(sample_contents)
+            category_name = self.llm.categorize_cluster(sample_data)
             
             categories[cluster_id] = category_name
             
-            # Afficher pour feedback
-            tqdm.write(f"   Cluster {cluster_id:2d} → {category_name}")
+            # Afficher pour feedback avec les premiers titres
+            sample_titles = [d['title'][:40] for d in sample_data[:3]]
+            tqdm.write(f"   Cluster {cluster_id:2d} ({len(samples)} notes) → {category_name}")
+            tqdm.write(f"      Ex: {', '.join(sample_titles)}...")
         
         print(f"✅ Catégorisation terminée\n")
         

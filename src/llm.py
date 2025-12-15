@@ -186,46 +186,48 @@ class LLMGenerator:
         response = self.tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
         return response.strip()
     
-    def categorize_cluster(self, sample_notes: List[str]) -> str:
+    def categorize_cluster(self, sample_notes: List[Dict[str, str]]) -> str:
         """
         Génère un nom de catégorie à partir d'échantillons de notes.
         
         Args:
-            sample_notes: Liste de contenus de notes représentatives du cluster
+            sample_notes: Liste de dicts avec 'title' et 'content'
         
         Returns:
-            Nom de catégorie proposé (ex: "Tech - Python")
+            Nom de catégorie proposé ou "Divers" si hétérogène
         """
-        # Construire le prompt avec plus de contenu (800 chars au lieu de 500)
-        samples_text = "\n\n---\n\n".join([f"Note {i+1}:\n{note[:800]}" for i, note in enumerate(sample_notes)])
+        # Construire le prompt avec titres + contenus
+        samples_text = "\n\n---\n\n".join([
+            f"Note {i+1}:\nTitre: {note['title']}\nContenu: {note['content'][:600]}" 
+            for i, note in enumerate(sample_notes)
+        ])
         
-        prompt = f"""
-Tu es un expert en Knowledge Management (PKM) pour Obsidian. Ta mission est de classer le groupe de notes suivant dans une hiérarchie stricte.
+        prompt = f"""<s>[INST] Tu es un expert en organisation de notes Obsidian.
 
-CONTEXTE :
-Tu dois analyser {len(sample_notes)} notes et déterminer leur point commun unique pour générer un titre de catégorie.
+ANALYSE {len(sample_notes)} NOTES CI-DESSOUS:
 
-RÈGLES ABSOLUES DE FORMATTAGE :
-1. Réponds UNIQUEMENT avec le titre. (Pas de markdown, pas de gras, pas d'intro).
-2. Format : "DOMAINE - SOUS-THÈME"
-   - Le DOMAINE doit être choisi dans la liste imposée ci-dessous.
-   - Le SOUS-THÈME doit être court (1 à 3 mots), précis et technique.
-
-MÉTHODOLOGIE POUR LE SOUS-THÈME :
-1. Sois "Chirurgical" : Utilise le vocabulaire technique présent dans les notes.
-2. Évite l'abstraction : Préfère "Numpy Array" à "Programmation Python".
-3. Évite le générique : Si les notes parlent de factures, écris "Comptabilité" ou "Factures", surtout pas "Administratif Divers".
-4. Si le contenu ne rentre pas parfaitement, choisis le Domaine le plus proche logiquement.
-
-EXEMPLES (Inputs -> Outputs attendus) :
-- Notes sur le Jardinage -> "Maison - Jardin" (Si Maison est autorisé)
-- Notes sur Docker/LXC -> "Tech - Conteneurs" ou "Dev - Ops"
-- Notes sur un Bilan sanguin -> "Santé - Analyses"
-
-NOTES À CLASSER :
 {samples_text}
 
-RÉPONSE (Strictement "Domaine - Sous-thème") : [/INST]"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TÂCHE: Trouve le thème commun précis de ces notes.
+
+RÈGLES STRICTES:
+1. Si les notes sont COHÉRENTES (même thème), réponds: "Domaine - Sous-thème"
+   Exemples:
+   • Notes sur Plakar/S3/backup → "Tech - Backup"
+   • Notes sur carrelage/sol SDB → "Maison - Travaux SDB"
+   • Notes sur JavaScript/Python → "Dev - Langages"
+   • Notes sur trading/finance → "Finance - Investissement"
+
+2. Si les notes sont HÉTÉROGÈNES (thèmes différents), réponds: "DIVERS"
+   Exemple: mélange torrent + carrelage + finance → DIVERS
+
+3. Utilise le vocabulaire des TITRES (pas d'invention)
+4. Maximum 4 mots, format "X - Y"
+5. Pas d'explication, juste la catégorie
+
+RÉPONSE:[/INST]"""
         
         # Générer la réponse
         category = self.generate(prompt, max_tokens=20, temperature=0.1)
