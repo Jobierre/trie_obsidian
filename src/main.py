@@ -13,15 +13,15 @@ from .category_manager import CategoryManager
 from .dry_run import DryRunManager
 
 
-def discover_mode(llm: LLMGenerator, documents: list, count: int):
+def discover_mode(llm: LLMGenerator, documents: list, count: int, sample_size: int = 50):
     """Mode découverte: analyse les notes et propose des catégories"""
     print("\n" + "=" * 60)
     print("🔍 MODE DÉCOUVERTE DES CATÉGORIES")
     print("=" * 60)
     print(f"Analyse de {len(documents)} notes pour proposer {count} catégories...\n")
     
-    # Prendre un échantillon représentatif (50 notes aléatoires max)
-    sample_size = min(50, len(documents))
+    # Prendre un échantillon représentatif
+    sample_size = min(sample_size, len(documents))
     sample = random.sample(documents, sample_size)
     
     # Préparer les données pour le LLM
@@ -174,6 +174,12 @@ def main():
         default=8,
         help='Nombre de catégories à découvrir (défaut: 8)'
     )
+    parser.add_argument(
+        '--sample',
+        type=int,
+        default=50,
+        help='Nombre de notes à analyser pour la découverte (défaut: 50)'
+    )
     
     # Mode classification
     parser.add_argument(
@@ -206,7 +212,7 @@ def main():
     # Mode découverte
     if args.discover:
         llm = LLMGenerator()
-        discover_mode(llm, documents, args.count)
+        discover_mode(llm, documents, args.count, args.sample)
     else:
         # Mode classification normale
         classify_mode(args)

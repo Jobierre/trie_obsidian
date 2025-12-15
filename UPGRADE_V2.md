@@ -23,6 +23,12 @@ python -m src.main --discover
 ```bash
 # Proposer 10 catégories au lieu de 8
 python -m src.main --discover --count 10
+
+# Analyser 100 notes au lieu de 50
+python -m src.main --discover --sample 100
+
+# Combiner les options
+python -m src.main --discover --count 10 --sample 100
 ```
 
 ### Étape 2: Classifier les notes
