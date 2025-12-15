@@ -1,112 +1,80 @@
 """
-Catégorisation des clusters avec le LLM
+Classification des notes avec le LLM (mode individuel)
 """
 from typing import List, Dict
-import numpy as np
+from pathlib import Path
 from tqdm import tqdm
 
 from .config import config
 from .llm import LLMGenerator
+from .cache import ClassificationCache
 
 
-class ClusterCategorizer:
-    """Génère des noms de catégories pour les clusters avec le LLM"""
+class NoteClassifier:
+    """Classe chaque note individuellement dans des catégories prédéfinies"""
     
-    def __init__(self, llm: LLMGenerator):
+    def __init__(self, llm: LLMGenerator, use_cache: bool = True):
         self.llm = llm
+        self.cache = ClassificationCache() if use_cache else None
     
-    def categorize_clusters(
-        self, 
-        cluster_samples: Dict[int, List[Dict[str, str]]]
-    ) -> Dict[int, str]:
-        """
-        Génère un nom de catégorie pour chaque cluster.
-        
-        Args:
-            cluster_samples: Dict mapping cluster_id -> liste d'échantillons de notes
-        
-        Returns:
-            Dict mapping cluster_id -> nom de catégorie
-        """
-        print(f"\n🏷️  Génération des noms de catégories pour {len(cluster_samples)} clusters...")
-        
-        categories = {}
-        
-        for cluster_id, samples in tqdm(cluster_samples.items(), desc="Catégorisation"):
-            # Extraire juste le contenu des notes
-            sample_contents = [doc['content'] for doc in samples]
-            
-            # Demander au LLM de générer un nom de catégorie
-            category_name = self.llm.categorize_cluster(sample_contents)
-            
-            categories[cluster_id] = category_name
-            
-            # Afficher pour feedback
-            tqdm.write(f"   Cluster {cluster_id:2d} → {category_name}")
-        
-        print(f"✅ Catégorisation terminée\n")
-        
-        return categories
-    
-    def handle_unclustered_notes(
-        self, 
-        unclustered_notes: List[Dict[str, str]]
-    ) -> str:
-        """
-        Décide quoi faire avec les notes non classées.
-        
-        Pour l'instant, on les met toutes dans une catégorie "Divers".
-        
-        Args:
-            unclustered_notes: Liste des notes non classées
-        
-        Returns:
-            Nom de catégorie pour les notes non classées
-        """
-        if not unclustered_notes:
-            return None
-        
-        print(f"\n📦 {len(unclustered_notes)} notes non classées")
-        
-        # Si trop peu de notes, les mettre dans "Divers"
-        if len(unclustered_notes) < config.min_cluster_size:
-            print(f"   → Catégorie: Divers (moins de {config.min_cluster_size} notes)")
-            return "Divers"
-        
-        # Si suffisamment de notes, on peut essayer de les sous-catégoriser
-        # Pour l'instant, on les met aussi dans "Divers"
-        # TODO: Implémenter un second niveau de clustering si besoin
-        print(f"   → Catégorie: Divers")
-        return "Divers"
-    
-    def map_notes_to_categories(
+    def classify_notes(
         self,
         documents: List[Dict[str, str]],
-        labels: np.ndarray,
-        categories: Dict[int, str]
+        categories: List[Dict[str, str]]
     ) -> Dict[str, str]:
         """
-        Crée un mapping note_path -> category_name.
+        Classe chaque note individuellement.
         
         Args:
-            documents: Liste des documents
-            labels: Labels de cluster pour chaque document
-            categories: Mapping cluster_id -> category_name
+            documents: Liste de dicts avec 'path', 'metadata', 'content'
+            categories: Liste de catégories disponibles avec 'name' et 'description'
         
         Returns:
             Dict mapping str(file_path) -> category_name
         """
-        note_to_category = {}
+        print(f"\n🏷️  Classification de {len(documents)} notes...")
+        print(f"📁 {len(categories)} catégories disponibles")
         
-        for i, doc in enumerate(documents):
-            cluster_id = int(labels[i])
+        if self.cache:
+            cache_stats = self.cache.get_stats()
+            print(f"💾 Cache: {cache_stats['total_entries']} entrées")
+        print()
+        
+        note_to_category = {}
+        cached_count = 0
+        classified_count = 0
+        
+        for doc in tqdm(documents, desc="Classification"):
+            file_path = doc['path']
+            content = doc['content']
             
-            if cluster_id == -1:
-                # Note non classée
-                category = "Divers"
+            # Extraire le titre
+            title = file_path.stem if hasattr(file_path, 'stem') else str(file_path).split('/')[-1].replace('.md', '')
+            
+            # Vérifier le cache
+            cached_category = None
+            if self.cache:
+                cached_category = self.cache.get_cached_category(file_path, content)
+            
+            if cached_category:
+                category = cached_category
+                cached_count += 1
             else:
-                category = categories.get(cluster_id, "Divers")
+                # Classifier avec le LLM
+                category = self.llm.choose_category(title, content, categories)
+                classified_count += 1
+                
+                # Mettre en cache
+                if self.cache:
+                    self.cache.cache_category(file_path, content, category)
             
-            note_to_category[str(doc['path'])] = category
+            note_to_category[str(file_path)] = category
+        
+        print(f"\n✅ Classification terminée:")
+        print(f"   • {classified_count} notes classifiées par le LLM")
+        if self.cache:
+            print(f"   • {cached_count} notes récupérées du cache")
+        print()
         
         return note_to_category
+
