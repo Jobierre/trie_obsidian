@@ -199,31 +199,33 @@ class LLMGenerator:
         # Construire le prompt avec plus de contenu (800 chars au lieu de 500)
         samples_text = "\n\n---\n\n".join([f"Note {i+1}:\n{note[:800]}" for i, note in enumerate(sample_notes)])
         
-        prompt = f"""<s>[INST] Tu es un expert en organisation de notes. Analyse ces {len(sample_notes)} notes et trouve leur thème commun.
+        prompt = f"""
+Tu es un expert en Knowledge Management (PKM) pour Obsidian. Ta mission est de classer le groupe de notes suivant dans une hiérarchie stricte.
 
-RÈGLES STRICTES:
-1. Réponds UNIQUEMENT avec le nom de catégorie, sans explication
-2. Format obligatoire: "Domaine - Sous-thème" (2-4 mots maximum)
-3. Soit PRÉCIS et SPÉCIFIQUE au contenu réel des notes
-4. Utilise le MÊME vocabulaire que les notes (pas de généralisation excessive)
+CONTEXTE :
+Tu dois analyser {len(sample_notes)} notes et déterminer leur point commun unique pour générer un titre de catégorie.
 
-EXEMPLES DE BONNES CATÉGORIES:
-- "Dev - Python Django"
-- "Finance - Trading"
-- "Maison - Travaux SDB"
-- "Tech - Backup Plakar"
-- "Admin - Configuration LXC"
-- "Perso - Rendez-vous"
+RÈGLES ABSOLUES DE FORMATTAGE :
+1. Réponds UNIQUEMENT avec le titre. (Pas de markdown, pas de gras, pas d'intro).
+2. Format : "DOMAINE - SOUS-THÈME"
+   - Le DOMAINE doit être choisi dans la liste imposée ci-dessous.
+   - Le SOUS-THÈME doit être court (1 à 3 mots), précis et technique.
 
-EXEMPLES DE MAUVAISES CATÉGORIES:
-- "Systems - Configuration" (trop vague)
-- "Development Tools" (pas de sous-thème)
-- "Alimentation - Boissons" (hors sujet si pas dans les notes)
+MÉTHODOLOGIE POUR LE SOUS-THÈME :
+1. Sois "Chirurgical" : Utilise le vocabulaire technique présent dans les notes.
+2. Évite l'abstraction : Préfère "Numpy Array" à "Programmation Python".
+3. Évite le générique : Si les notes parlent de factures, écris "Comptabilité" ou "Factures", surtout pas "Administratif Divers".
+4. Si le contenu ne rentre pas parfaitement, choisis le Domaine le plus proche logiquement.
 
-NOTES À ANALYSER:
+EXEMPLES (Inputs -> Outputs attendus) :
+- Notes sur le Jardinage -> "Maison - Jardin" (Si Maison est autorisé)
+- Notes sur Docker/LXC -> "Tech - Conteneurs" ou "Dev - Ops"
+- Notes sur un Bilan sanguin -> "Santé - Analyses"
+
+NOTES À CLASSER :
 {samples_text}
 
-Nom de catégorie précis: [/INST]"""
+RÉPONSE (Strictement "Domaine - Sous-thème") : [/INST]"""
         
         # Générer la réponse
         category = self.generate(prompt, max_tokens=20, temperature=0.1)
