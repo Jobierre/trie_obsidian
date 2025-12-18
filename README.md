@@ -12,7 +12,10 @@ Cet outil analyse vos notes Obsidian (.md) avec des embeddings IA, les regroupe 
 - 🎯 **Clustering intelligent** : UMAP + HDBSCAN pour grouper les notes similaires
 - 🤖 **Catégorisation par LLM** : [Ministral-3B](https://huggingface.co/mistralai/Ministral-3b-instruct-2412) génère des noms de catégories pertinents
 - ⚡ **Multi-plateforme** : Support automatique MLX (Apple Silicon M1/M2/M3/M4) et CUDA (NVIDIA GPU)
-- 🔍 **Dry-run obligatoire** : Prévisualisez les changements avant application
+- � **NPU Apple Silicon** : Embeddings MLX natifs pour exploiter le NPU du M4
+- 👷 **Parallélisation** : Scan des fichiers et appels LLM parallélisés (configurable via `--workers`)
+- 🔐 **Cache thread-safe** : Verrouillage fichier pour les accès concurrents
+- �🔍 **Dry-run obligatoire** : Prévisualisez les changements avant application
 - 📊 **Rapports détaillés** : Markdown et JSON
 
 ---
@@ -144,6 +147,12 @@ python -m src.main --report-format json
 
 # Générer les deux formats
 python -m src.main --report-format both
+
+# Contrôler le nombre de workers (0 = auto-détection)
+python -m src.main --workers 4
+
+# Effacer le cache et tout reclassifier
+python -m src.main --clear-cache
 ```
 
 ---
@@ -268,21 +277,24 @@ tire_obsidian/
 ├── output/                   # Rapports et embeddings
 │   ├── dry_run_report_*.md
 │   ├── dry_run_report_*.json
+│   ├── classification_cache.json  # Cache des classifications
 │   └── embeddings.npy
 ├── src/
 │   ├── __init__.py
 │   ├── main.py              # Point d'entrée
-│   ├── config.py            # Configuration + détection backend
-│   ├── embeddings.py        # EmbeddingGemma wrapper
+│   ├── config.py            # Configuration + détection backend + workers
+│   ├── embeddings.py        # EmbeddingGenerator + MLXEmbeddingGenerator (NPU)
 │   ├── llm.py               # Ministral wrapper (MLX/CUDA)
 │   ├── clustering.py        # UMAP + HDBSCAN
-│   ├── categorizer.py       # Génération catégories LLM
-│   ├── frontmatter_manager.py  # Lecture/écriture YAML
+│   ├── categorizer.py       # Classification LLM parallélisée
+│   ├── cache.py             # Cache thread-safe avec FileLock
+│   ├── frontmatter_manager.py  # Lecture/écriture YAML parallélisée
 │   └── dry_run.py           # Rapports
-├── .env                     # Configuration (à créer)
+├── categories.yaml          # Catégories personnalisables
+├── .env                     # Configuration (créer depuis .env.example)
 ├── .env.example
-├── requirements-mlx.txt
-├── requirements-cuda.txt
+├── requirements-mlx.txt     # Dépendances Mac (inclut psutil, filelock)
+├── requirements-cuda.txt    # Dépendances Windows/Linux
 └── README.md
 ```
 

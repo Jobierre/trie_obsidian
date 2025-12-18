@@ -21,6 +21,21 @@
 | **all-MiniLM-L6-v2** | 22M | 384 | `sentence-transformers/all-MiniLM-L6-v2` |
 | **all-mpnet-base-v2** | 110M | 768 | `sentence-transformers/all-mpnet-base-v2` |
 
+### Embeddings MLX natifs (NPU Apple Silicon)
+
+Pour exploiter le NPU du M4 et obtenir des performances optimales :
+
+| Modèle | Taille | Dimension | ID Hugging Face |
+|--------|--------|-----------|----------------|
+| **BGE-small-en MLX** (recommandé) | 33M | 384 | `mlx-community/bge-small-en-v1.5-mlx` |
+| **Nomic Embed MLX** | 137M | 768 | `mlx-community/nomic-embed-text-v1.5-mlx` |
+
+**Configuration dans `.env` :**
+```env
+# Activer les embeddings MLX natifs (NPU)
+EMBEDDING_MODEL_MLX=mlx-community/bge-small-en-v1.5-mlx
+```
+
 ---
 
 ## Pour Windows/Linux avec CUDA
@@ -41,9 +56,10 @@
 ## Configuration dans `.env`
 
 ```env
-# Pour Mac M4
+# Pour Mac M4 (avec NPU)
 LLM_MODEL=mlx-community/Mistral-7B-Instruct-v0.3-4bit
 EMBEDDING_MODEL=google/embeddinggemma-300m
+EMBEDDING_MODEL_MLX=mlx-community/bge-small-en-v1.5-mlx  # Optionnel: embeddings NPU
 
 # Pour Windows RTX 5070ti
 LLM_MODEL=mistralai/Mistral-7B-Instruct-v0.3

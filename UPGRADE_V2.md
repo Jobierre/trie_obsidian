@@ -94,7 +94,48 @@ Relancez simplement `python -m src.main` après modification.
 
 ---
 
-## 💾 Système de cache
+## � Parallélisation (v2.1)
+
+La classification est maintenant parallélisée pour des performances optimales :
+
+```bash
+# Auto-détection du nombre de workers (défaut)
+python -m src.main
+
+# Spécifier le nombre de workers
+python -m src.main --workers 4
+```
+
+**Au démarrage :**
+```
+👷 Utilisation de 4 workers (auto-détecté)
+```
+
+**Détails techniques :**
+- Scan des fichiers parallélisé via `ThreadPoolExecutor`
+- Appels LLM parallélisés (limités à `workers // 2` pour la mémoire)
+- Cache thread-safe avec `FileLock`
+- Auto-détection basée sur CPU et RAM disponible via `psutil`
+
+---
+
+## 🚀 Embeddings MLX Natifs (v2.1)
+
+Sur Mac Apple Silicon, vous pouvez utiliser des embeddings MLX natifs pour exploiter le NPU :
+
+```env
+# Dans .env
+EMBEDDING_MODEL_MLX=mlx-community/bge-small-en-v1.5-mlx
+```
+
+**Avantages :**
+- ⚡ Performances optimales sur M1/M2/M3/M4
+- 🧠 Exploitation du NPU (Neural Processing Unit)
+- 💾 Moins de mémoire utilisée
+
+---
+
+## �💾 Système de cache
 
 Le fichier `output/classification_cache.json` stocke les classifications déjà effectuées.
 
@@ -141,14 +182,16 @@ $ python -m src.main
 
 ## 🆚 Comparaison Ancien vs Nouveau
 
-| Critère | Ancien (Clustering) | Nouveau (Classification) |
-|---------|---------------------|---------------------------|
+| Critère | Ancien (Clustering) | Nouveau (Classification v2.1) |
+|---------|---------------------|-------------------------------|
 | **Précision** | ❌ Clusters hétérogènes | ✅ Chaque note analysée individuellement |
 | **Contrôle** | ❌ Catégories auto-générées | ✅ Vous validez les catégories |
 | **Cohérence** | ❌ "Torrent + Carrelage + Finance" | ✅ Chaque note dans SA catégorie |
-| **Vitesse 1ère fois** | ⚡ ~2 min | 🐢 ~5-10 min (75 notes) |
+| **Vitesse 1ère fois** | ⚡ ~2 min | 🚀 ~2-3 min (parallélisé, 75 notes) |
 | **Vitesse relance** | 🐢 Toujours pareil | ⚡ Instantané (cache) |
 | **Nouvelles notes** | 🔄 Tout recalculer | ✅ Seules les nouvelles |
+| **Thread-safety** | ❌ Non | ✅ Cache avec FileLock |
+| **NPU Apple** | ❌ Non | ✅ Embeddings MLX natifs |
 
 ---
 
