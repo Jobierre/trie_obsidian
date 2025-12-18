@@ -104,69 +104,80 @@ class LLMGenerator:
         """Charge le modèle avec PyTorch + CUDA (quantization 4-bit)"""
         try:
             import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
             
-            print(f"🔧 Chargement du modèle: {config.llm_model}")
+            # Vérifier si c'est Ministral 3 (nécessite API spécifique)
+            is_ministral3 = "Ministral-3" in config.llm_model or "ministral3" in config.llm_model.lower()
             
-            # Configuration 4-bit pour économiser la VRAM
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.bfloat16,
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_quant_type="nf4"
-            )
-            
-            # Pour Ministral 3, mistral-common est requis
-            try:
-                import mistral_common
-                print(f"✅ mistral-common version: {mistral_common.__version__}")
-            except ImportError:
-                print("⚠️  mistral-common non trouvé, peut causer des problèmes avec Ministral 3")
-            
-            # Charger le tokenizer avec trust_remote_code
-            print("📦 Chargement du tokenizer...")
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                config.llm_model,
-                token=config.hf_token,
-                trust_remote_code=True
-            )
-            
-            # Charger le modèle avec quantization
-            print("🚀 Chargement du modèle (peut prendre quelques minutes)...")
-            self.model = AutoModelForCausalLM.from_pretrained(
-                config.llm_model,
-                device_map="auto",
-                quantization_config=quantization_config,
-                token=config.hf_token,
-                trust_remote_code=True,
-                torch_dtype=torch.bfloat16,
-                attn_implementation="sdpa"  # Optimisation attention
-            )
+            if is_ministral3:
+                print(f"🔧 Modèle Ministral 3 détecté : {config.llm_model}")
+                from transformers import Mistral3ForConditionalGeneration, MistralCommonBackend, BitsAndBytesConfig
+                
+                # Configuration 4-bit
+                quantization_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_quant_type="nf4"
+                )
+                
+                print("📦 Chargement du tokenizer MistralCommonBackend...")
+                self.tokenizer = MistralCommonBackend.from_pretrained(config.llm_model)
+                
+                print("🚀 Chargement du modèle Mistral3 (peut prendre quelques minutes)...")
+                self.model = Mistral3ForConditionalGeneration.from_pretrained(
+                    config.llm_model,
+                    torch_dtype=torch.bfloat16,
+                    device_map="auto",
+                    quantization_config=quantization_config,
+                    token=config.hf_token
+                )
+                
+                self._is_ministral3 = True
+                print("✅ Modèle Ministral 3 chargé avec succès")
+                
+            else:
+                # Modèles classiques (Mistral, Llama, etc.)
+                from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+                
+                quantization_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_quant_type="nf4"
+                )
+                
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    config.llm_model,
+                    token=config.hf_token,
+                    trust_remote_code=True
+                )
+                
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    config.llm_model,
+                    device_map="auto",
+                    quantization_config=quantization_config,
+                    token=config.hf_token,
+                    trust_remote_code=True,
+                    torch_dtype=torch.bfloat16
+                )
+                
+                self._is_ministral3 = False
             
             self.model.eval()
-            print("✅ Modèle chargé en mode évaluation")
             
         except ImportError as e:
-            if "mistral_common" in str(e):
+            if "Mistral3ForConditionalGeneration" in str(e):
                 raise ImportError(
-                    "\n❌ mistral-common non installé.\n"
-                    "Installation: pip install mistral-common>=1.8.6"
+                    "\n❌ Mistral3ForConditionalGeneration non trouvé.\n"
+                    "Installez transformers depuis git:\n"
+                    "   pip uninstall transformers -y\n"
+                    "   pip install git+https://github.com/huggingface/transformers.git\n"
+                    "   pip install mistral-common>=1.8.6\n"
                 ) from e
             else:
                 raise ImportError(
                     "PyTorch/Transformers non installé. Installation: pip install -r requirements-cuda.txt"
                 ) from e
-        except Exception as e:
-            if "Mistral3Config" in str(e) or "ministral3" in str(e).lower():
-                raise ValueError(
-                    f"\n❌ Version de transformers trop ancienne pour {config.llm_model}\n"
-                    f"\n💡 Installez transformers depuis git:\n"
-                    f"   pip uninstall transformers -y\n"
-                    f"   pip install git+https://github.com/huggingface/transformers.git\n"
-                    f"   pip install mistral-common>=1.8.6\n"
-                ) from e
-            else:
-                raise
     
     def _load_cpu(self):
         """Charge le modèle en mode CPU (sans CUDA, sans quantization lourde)"""
@@ -240,22 +251,51 @@ class LLMGenerator:
         """Génération avec CUDA"""
         import torch
         
-        # Encoder le prompt
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+        # Ministral 3 utilise une API différente
+        if hasattr(self, '_is_ministral3') and self._is_ministral3:
+            # Format pour Ministral 3 (texte seul)
+            messages = [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": prompt}]
+                }
+            ]
+            
+            # Tokeniser avec MistralCommonBackend
+            tokenized = self.tokenizer.apply_chat_template(messages, return_tensors="pt", return_dict=True)
+            tokenized["input_ids"] = tokenized["input_ids"].to(device="cuda")
+            
+            # Générer
+            with torch.no_grad():
+                output = self.model.generate(
+                    **tokenized,
+                    max_new_tokens=max_tokens,
+                    temperature=temperature,
+                    do_sample=temperature > 0
+                )[0]
+            
+            # Décoder seulement la partie générée
+            response = self.tokenizer.decode(output[len(tokenized["input_ids"][0]):])
+            return response.strip()
         
-        # Générer
-        with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=max_tokens,
-                temperature=temperature,
-                do_sample=temperature > 0,
-                pad_token_id=self.tokenizer.eos_token_id
-            )
-        
-        # Décoder (en enlevant le prompt)
-        response = self.tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
-        return response.strip()
+        else:
+            # Modèles classiques (AutoModelForCausalLM)
+            # Encoder le prompt
+            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+            
+            # Générer
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_tokens,
+                    temperature=temperature,
+                    do_sample=temperature > 0,
+                    pad_token_id=self.tokenizer.eos_token_id
+                )
+            
+            # Décoder (en enlevant le prompt)
+            response = self.tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+            return response.strip()
     
     def categorize_cluster(self, sample_notes: List[Dict[str, str]]) -> str:
         """
