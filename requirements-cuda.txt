@@ -1,7 +1,7 @@
 # Requirements pour Windows/Linux avec CUDA
 # Installation préalable: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 torch>=2.5.0
-transformers>=5.0.0rc0
+transformers>=5.0.0rc1
 mistral-common>=1.8.6
 accelerate>=1.2.0
 bitsandbytes>=0.45.0

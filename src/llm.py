@@ -106,18 +106,7 @@ class LLMGenerator:
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
             
-            # Détecter si c'est un modèle Ministral 3 (nécessite mistral-common)
-            is_ministral3 = "Ministral-3" in config.llm_model or "ministral3" in config.llm_model.lower()
-            
-            if is_ministral3:
-                print("🔧 Modèle Ministral 3 détecté, utilisation du tokenizer mistral-common")
-                try:
-                    from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
-                    # Pour Ministral 3, on utilise le tokenizer de mistral-common via transformers
-                except ImportError:
-                    raise ImportError(
-                        "mistral-common non installé. Installation: pip install mistral-common>=1.8.6"
-                    )
+            print(f"🔧 Chargement du modèle: {config.llm_model}")
             
             # Configuration 4-bit pour économiser la VRAM
             quantization_config = BitsAndBytesConfig(
@@ -127,7 +116,15 @@ class LLMGenerator:
                 bnb_4bit_quant_type="nf4"
             )
             
-            # Charger le tokenizer
+            # Pour Ministral 3, mistral-common est requis
+            try:
+                import mistral_common
+                print(f"✅ mistral-common version: {mistral_common.__version__}")
+            except ImportError:
+                print("⚠️  mistral-common non trouvé, peut causer des problèmes avec Ministral 3")
+            
+            # Charger le tokenizer avec trust_remote_code
+            print("📦 Chargement du tokenizer...")
             self.tokenizer = AutoTokenizer.from_pretrained(
                 config.llm_model,
                 token=config.hf_token,
@@ -135,30 +132,41 @@ class LLMGenerator:
             )
             
             # Charger le modèle avec quantization
+            print("🚀 Chargement du modèle (peut prendre quelques minutes)...")
             self.model = AutoModelForCausalLM.from_pretrained(
                 config.llm_model,
                 device_map="auto",
                 quantization_config=quantization_config,
                 token=config.hf_token,
                 trust_remote_code=True,
-                torch_dtype=torch.bfloat16
+                torch_dtype=torch.bfloat16,
+                attn_implementation="sdpa"  # Optimisation attention
             )
             
-            self.model.eval()  # Mode évaluation
+            self.model.eval()
+            print("✅ Modèle chargé en mode évaluation")
             
         except ImportError as e:
-            raise ImportError(
-                "PyTorch/Transformers non installé. Installation: pip install -r requirements-cuda.txt"
-            ) from e
-        except KeyError as e:
-            # Modèle non supporté par transformers (trop récent)
-            raise ValueError(
-                f"\n❌ Le modèle {config.llm_model} n'est pas encore supporté par transformers.\n"
-                f"\n💡 Installez transformers 5.0:\n"
-                f"   pip install transformers>=5.0.0rc0 mistral-common>=1.8.6\n"
-                f"\n   Ou utilisez un modèle compatible:\n"
-                f"   LLM_MODEL=mistralai/Mistral-7B-Instruct-v0.3\n"
-            ) from e
+            if "mistral_common" in str(e):
+                raise ImportError(
+                    "\n❌ mistral-common non installé.\n"
+                    "Installation: pip install mistral-common>=1.8.6"
+                ) from e
+            else:
+                raise ImportError(
+                    "PyTorch/Transformers non installé. Installation: pip install -r requirements-cuda.txt"
+                ) from e
+        except Exception as e:
+            if "Mistral3Config" in str(e) or "ministral3" in str(e).lower():
+                raise ValueError(
+                    f"\n❌ Version de transformers trop ancienne pour {config.llm_model}\n"
+                    f"\n💡 Installez transformers depuis git:\n"
+                    f"   pip uninstall transformers -y\n"
+                    f"   pip install git+https://github.com/huggingface/transformers.git\n"
+                    f"   pip install mistral-common>=1.8.6\n"
+                ) from e
+            else:
+                raise
     
     def _load_cpu(self):
         """Charge le modèle en mode CPU (sans CUDA, sans quantization lourde)"""
