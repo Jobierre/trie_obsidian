@@ -1,9 +1,12 @@
 """
-Gestion du frontmatter YAML des notes Obsidian
+Gestion du frontmatter YAML des notes Obsidian (avec support parallélisation)
 """
 from pathlib import Path
 from typing import Optional, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import frontmatter
+
+from .config import get_max_workers
 
 
 class FrontmatterManager:
@@ -118,18 +121,36 @@ class FrontmatterManager:
         return sorted(list(categories))
     
     @staticmethod
-    def scan_vault(vault_path: Path) -> List[dict]:
+    def _read_note_safe(md_file: Path) -> Optional[dict]:
         """
-        Scanne tous les fichiers .md dans le vault.
+        Lit une note de manière sécurisée (pour utilisation parallèle).
+        
+        Returns:
+            Dict avec 'path', 'metadata' et 'content', ou None en cas d'erreur
+        """
+        try:
+            note_data = FrontmatterManager.read_note(md_file)
+            return {
+                'path': md_file,
+                'metadata': note_data['metadata'],
+                'content': note_data['content']
+            }
+        except Exception as e:
+            print(f"⚠️  Erreur lecture {md_file.name}: {e}")
+            return None
+    
+    @staticmethod
+    def scan_vault(vault_path: Path, num_workers: int = 0) -> List[dict]:
+        """
+        Scanne tous les fichiers .md dans le vault (parallélisé).
         
         Args:
             vault_path: Chemin vers le vault Obsidian
+            num_workers: Nombre de workers (0 = auto)
         
         Returns:
             Liste de dicts avec 'path', 'metadata' et 'content'
         """
-        documents = []
-        
         print(f"📂 Scan du vault: {vault_path}")
         
         md_files = list(vault_path.rglob("*.md"))
@@ -139,18 +160,25 @@ class FrontmatterManager:
         
         print(f"📄 {len(md_files)} notes trouvées")
         
-        for md_file in md_files:
-            try:
-                note_data = FrontmatterManager.read_note(md_file)
-                documents.append({
-                    'path': md_file,
-                    'metadata': note_data['metadata'],
-                    'content': note_data['content']
-                })
-            except Exception as e:
-                print(f"⚠️  Erreur lecture {md_file.name}: {e}")
-                continue
+        workers = get_max_workers(num_workers)
+        documents = []
+        errors = 0
         
-        print(f"✅ {len(documents)} notes chargées avec succès\n")
+        # Parallélisation de la lecture des fichiers
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(FrontmatterManager._read_note_safe, md_file): md_file for md_file in md_files}
+            
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    documents.append(result)
+                else:
+                    errors += 1
+        
+        print(f"✅ {len(documents)} notes chargées avec succès", end="")
+        if errors > 0:
+            print(f" ({errors} erreurs)")
+        else:
+            print("\n")
         
         return documents

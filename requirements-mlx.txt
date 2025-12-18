@@ -12,3 +12,5 @@ tqdm>=4.67.1
 numpy>=1.26.0
 hf_xet
 pyyaml
+psutil>=5.9.0
+filelock>=3.12.0

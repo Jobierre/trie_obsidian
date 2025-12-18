@@ -1,5 +1,5 @@
 """
-Système de cache pour éviter de reclassifier les notes déjà traitées
+Système de cache thread-safe pour éviter de reclassifier les notes déjà traitées
 """
 import json
 import hashlib
@@ -7,34 +7,59 @@ from pathlib import Path
 from typing import Dict, Optional
 from datetime import datetime
 
+try:
+    from filelock import FileLock
+    HAS_FILELOCK = True
+except ImportError:
+    HAS_FILELOCK = False
+
 from .config import config
 
 
 class ClassificationCache:
-    """Cache les classifications de notes pour éviter les reclassifications"""
+    """Cache les classifications de notes pour éviter les reclassifications (thread-safe)"""
     
     def __init__(self):
         self.cache_file = config.output_dir / "classification_cache.json"
+        self.lock_file = config.output_dir / "classification_cache.json.lock"
+        self._lock = FileLock(str(self.lock_file)) if HAS_FILELOCK else None
         self.cache = self._load_cache()
     
+    def _acquire_lock(self):
+        """Acquiert le verrou pour les accès concurrents"""
+        if self._lock:
+            self._lock.acquire()
+    
+    def _release_lock(self):
+        """Libère le verrou"""
+        if self._lock:
+            self._lock.release()
+    
     def _load_cache(self) -> Dict:
-        """Charge le cache depuis le disque"""
-        if self.cache_file.exists():
-            try:
-                with open(self.cache_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"⚠️  Erreur lecture cache: {e}")
-                return {}
-        return {}
+        """Charge le cache depuis le disque (thread-safe)"""
+        self._acquire_lock()
+        try:
+            if self.cache_file.exists():
+                try:
+                    with open(self.cache_file, 'r', encoding='utf-8') as f:
+                        return json.load(f)
+                except Exception as e:
+                    print(f"⚠️  Erreur lecture cache: {e}")
+                    return {}
+            return {}
+        finally:
+            self._release_lock()
     
     def _save_cache(self):
-        """Sauvegarde le cache sur le disque"""
+        """Sauvegarde le cache sur le disque (thread-safe)"""
+        self._acquire_lock()
         try:
             with open(self.cache_file, 'w', encoding='utf-8') as f:
                 json.dump(self.cache, f, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"⚠️  Erreur sauvegarde cache: {e}")
+        finally:
+            self._release_lock()
     
     def _get_note_hash(self, note_path: Path, content: str) -> str:
         """Génère un hash unique pour une note (basé sur le chemin + contenu)"""

@@ -2,15 +2,20 @@
 Script principal d'orchestration
 """
 import argparse
+import logging
 import random
 from pathlib import Path
 
-from .config import config
+from .config import config, get_max_workers
 from .frontmatter_manager import FrontmatterManager
 from .llm import LLMGenerator
 from .categorizer import NoteClassifier
 from .category_manager import CategoryManager
 from .dry_run import DryRunManager
+
+# Configuration du logger
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(message)s')
 
 
 def discover_mode(llm: LLMGenerator, documents: list, count: int, sample_size: int = 50):
@@ -82,7 +87,7 @@ def classify_mode(args):
     print("ÉTAPE 1/4: Scan du vault")
     print("=" * 60)
     
-    documents = FrontmatterManager.scan_vault(config.vault_path)
+    documents = FrontmatterManager.scan_vault(config.vault_path, num_workers=args.num_workers)
     
     if len(documents) == 0:
         print("❌ Aucune note trouvée. Copiez vos notes .md dans le dossier:")
@@ -109,7 +114,7 @@ def classify_mode(args):
     print("=" * 60)
     
     llm = LLMGenerator()
-    classifier = NoteClassifier(llm, use_cache=not args.clear_cache)
+    classifier = NoteClassifier(llm, use_cache=not args.clear_cache, num_workers=args.num_workers)
     
     note_to_category = classifier.classify_notes(documents, categories)
     
@@ -199,11 +204,24 @@ def main():
         default='markdown',
         help='Format du rapport de dry-run'
     )
+    parser.add_argument(
+        '--workers',
+        type=int,
+        default=0,
+        help='Nombre de workers pour la parallélisation (0=auto)'
+    )
     
     args = parser.parse_args()
     
+    # Calculer et afficher le nombre de workers
+    workers = get_max_workers(args.workers)
+    logger.info(f"👷 Utilisation de {workers} workers ({'auto-détecté' if args.workers == 0 else '--workers'})")
+    
+    # Stocker le nombre de workers dans args pour le passer aux fonctions
+    args.num_workers = workers
+    
     # Scanner le vault dans tous les cas
-    documents = FrontmatterManager.scan_vault(config.vault_path)
+    documents = FrontmatterManager.scan_vault(config.vault_path, num_workers=workers)
     
     if len(documents) == 0:
         print("❌ Aucune note trouvée. Copiez vos notes .md dans:")

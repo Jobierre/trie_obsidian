@@ -10,6 +10,34 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def get_max_workers(cli_workers: int = 0) -> int:
+    """
+    Calcule le nombre optimal de workers pour la parallélisation.
+    
+    Args:
+        cli_workers: Nombre de workers spécifié via --workers (0 = auto)
+    
+    Returns:
+        Nombre de workers à utiliser
+    """
+    if cli_workers > 0:
+        return cli_workers
+    
+    try:
+        import psutil
+        # Utiliser le nombre de cœurs logiques, avec un minimum de 2
+        cpu_count = psutil.cpu_count(logical=True) or 4
+        # Limiter à la mémoire disponible (environ 1 worker par 2GB de RAM)
+        available_memory_gb = psutil.virtual_memory().available / (1024 ** 3)
+        memory_based_workers = max(2, int(available_memory_gb / 2))
+        
+        # Prendre le minimum entre CPU et mémoire
+        return min(cpu_count, memory_based_workers, 8)  # Max 8 workers
+    except ImportError:
+        # Fallback si psutil n'est pas installé
+        return 4
+
+
 class Config:
     """Configuration globale de l'application"""
     
@@ -46,6 +74,7 @@ class Config:
         
         # Modèles
         self.embedding_model = os.getenv("EMBEDDING_MODEL", "google/embeddinggemma-300m")
+        self.embedding_model_mlx = os.getenv("EMBEDDING_MODEL_MLX", "")
         self.llm_model = os.getenv("LLM_MODEL", "mistralai/Ministral-3b-instruct-2412")
         
         # Afficher la configuration
