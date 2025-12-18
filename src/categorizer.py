@@ -13,13 +13,21 @@ from .cache import ClassificationCache
 
 
 class NoteClassifier:
-    """Classe chaque note individuellement dans des catégories prédéfinies (parallélisé)"""
+    """Classe chaque note individuellement dans des catégories prédéfinies (parallélisé si possible)"""
     
     def __init__(self, llm: LLMGenerator, use_cache: bool = True, num_workers: int = 0):
         self.llm = llm
         self.cache = ClassificationCache() if use_cache else None
-        # Limiter les workers LLM à la moitié pour la mémoire
-        self.num_workers = max(1, get_max_workers(num_workers) // 2)
+        
+        # MLX n'est PAS thread-safe - forcer 1 worker pour éviter les segfaults
+        if config.backend == "mlx":
+            self.num_workers = 1
+            self._parallel_enabled = False
+        else:
+            # Limiter les workers LLM à la moitié pour la mémoire (CUDA/CPU)
+            self.num_workers = max(1, get_max_workers(num_workers) // 2)
+            self._parallel_enabled = self.num_workers > 1
+        
         self._lock = threading.Lock()
     
     def _classify_single_note(
@@ -73,7 +81,10 @@ class NoteClassifier:
         """
         print(f"\n🏷️  Classification de {len(documents)} notes...")
         print(f"📁 {len(categories)} catégories disponibles")
-        print(f"👷 {self.num_workers} workers LLM")
+        if self._parallel_enabled:
+            print(f"👷 {self.num_workers} workers LLM")
+        else:
+            print(f"⚡ Mode séquentiel (MLX non thread-safe)")
         
         if self.cache:
             cache_stats = self.cache.get_stats()
@@ -84,23 +95,33 @@ class NoteClassifier:
         cached_count = 0
         classified_count = 0
         
-        # Parallélisation des appels LLM
-        with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
-            # Soumettre toutes les tâches
-            futures = {
-                executor.submit(self._classify_single_note, doc, categories): doc
-                for doc in documents
-            }
-            
-            # Récupérer les résultats avec barre de progression
-            for future in tqdm(as_completed(futures), total=len(documents), desc="Classification"):
-                file_path, category, from_cache = future.result()
+        # Mode séquentiel pour MLX (pas thread-safe)
+        if not self._parallel_enabled:
+            for doc in tqdm(documents, desc="Classification"):
+                file_path, category, from_cache = self._classify_single_note(doc, categories)
                 note_to_category[file_path] = category
-                
                 if from_cache:
                     cached_count += 1
                 else:
                     classified_count += 1
+        else:
+            # Parallélisation des appels LLM (CUDA/CPU uniquement)
+            with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+                # Soumettre toutes les tâches
+                futures = {
+                    executor.submit(self._classify_single_note, doc, categories): doc
+                    for doc in documents
+                }
+                
+                # Récupérer les résultats avec barre de progression
+                for future in tqdm(as_completed(futures), total=len(documents), desc="Classification"):
+                    file_path, category, from_cache = future.result()
+                    note_to_category[file_path] = category
+                    
+                    if from_cache:
+                        cached_count += 1
+                    else:
+                        classified_count += 1
         
         print(f"\n✅ Classification terminée:")
         print(f"   • {classified_count} notes classifiées par le LLM")
