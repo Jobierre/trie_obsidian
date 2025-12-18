@@ -16,6 +16,8 @@ class LLMGenerator:
             self._load_mlx()
         elif self.backend == "cuda":
             self._load_cuda()
+        elif self.backend == "cpu":
+            self._load_cpu()
         else:
             raise ValueError(f"Backend {self.backend} non supporté pour le LLM")
         
@@ -120,13 +122,14 @@ class LLMGenerator:
             )
             
             # Charger le modèle avec quantization
+            # Utiliser dtype="auto" au lieu de torch_dtype (deprecated)
             self.model = AutoModelForCausalLM.from_pretrained(
                 config.llm_model,
                 device_map="auto",
                 quantization_config=quantization_config,
                 token=config.hf_token,
                 trust_remote_code=True,
-                torch_dtype=torch.bfloat16
+                dtype="auto"
             )
             
             self.model.eval()  # Mode évaluation
@@ -134,6 +137,54 @@ class LLMGenerator:
         except ImportError as e:
             raise ImportError(
                 "PyTorch/Transformers non installé. Installation: pip install -r requirements-cuda.txt"
+            ) from e
+        except KeyError as e:
+            # Modèle non supporté par transformers (trop récent)
+            raise ValueError(
+                f"\n❌ Le modèle {config.llm_model} n'est pas encore supporté par transformers.\n"
+                f"\n💡 Utilisez un modèle compatible dans .env:\n"
+                f"   LLM_MODEL=mistralai/Mistral-7B-Instruct-v0.3\n"
+                f"   LLM_MODEL=mistralai/Ministral-8B-Instruct-2410\n"
+                f"   LLM_MODEL=meta-llama/Llama-3.1-8B-Instruct\n"
+            ) from e
+    
+    def _load_cpu(self):
+        """Charge le modèle en mode CPU (sans CUDA, sans quantization lourde)"""
+        try:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            
+            print("⚠️  Mode CPU: performances limitées, considérez un modèle plus petit")
+            
+            # Charger le tokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                config.llm_model,
+                token=config.hf_token,
+                trust_remote_code=True
+            )
+            
+            # Charger le modèle en float32 sur CPU
+            self.model = AutoModelForCausalLM.from_pretrained(
+                config.llm_model,
+                token=config.hf_token,
+                trust_remote_code=True,
+                dtype="auto",
+                device_map="cpu",
+                low_cpu_mem_usage=True
+            )
+            
+            self.model.eval()
+            
+        except ImportError as e:
+            raise ImportError(
+                "PyTorch/Transformers non installé. Installation: pip install -r requirements-cuda.txt"
+            ) from e
+        except KeyError as e:
+            raise ValueError(
+                f"\n❌ Le modèle {config.llm_model} n'est pas encore supporté par transformers.\n"
+                f"\n💡 Utilisez un modèle compatible dans .env:\n"
+                f"   LLM_MODEL=mistralai/Mistral-7B-Instruct-v0.3\n"
+                f"   LLM_MODEL=mistralai/Ministral-8B-Instruct-2410\n"
             ) from e
     
     def generate(self, prompt: str, max_tokens: int = 150, temperature: float = 0.3) -> str:
@@ -150,7 +201,7 @@ class LLMGenerator:
         """
         if self.backend == "mlx":
             return self._generate_mlx(prompt, max_tokens, temperature)
-        elif self.backend == "cuda":
+        elif self.backend in ("cuda", "cpu"):
             return self._generate_cuda(prompt, max_tokens, temperature)
     
     def _generate_mlx(self, prompt: str, max_tokens: int, temperature: float) -> str:
