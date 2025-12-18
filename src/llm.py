@@ -106,6 +106,19 @@ class LLMGenerator:
             import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
             
+            # Détecter si c'est un modèle Ministral 3 (nécessite mistral-common)
+            is_ministral3 = "Ministral-3" in config.llm_model or "ministral3" in config.llm_model.lower()
+            
+            if is_ministral3:
+                print("🔧 Modèle Ministral 3 détecté, utilisation du tokenizer mistral-common")
+                try:
+                    from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
+                    # Pour Ministral 3, on utilise le tokenizer de mistral-common via transformers
+                except ImportError:
+                    raise ImportError(
+                        "mistral-common non installé. Installation: pip install mistral-common>=1.8.6"
+                    )
+            
             # Configuration 4-bit pour économiser la VRAM
             quantization_config = BitsAndBytesConfig(
                 load_in_4bit=True,
@@ -122,14 +135,13 @@ class LLMGenerator:
             )
             
             # Charger le modèle avec quantization
-            # Utiliser dtype="auto" au lieu de torch_dtype (deprecated)
             self.model = AutoModelForCausalLM.from_pretrained(
                 config.llm_model,
                 device_map="auto",
                 quantization_config=quantization_config,
                 token=config.hf_token,
                 trust_remote_code=True,
-                dtype="auto"
+                torch_dtype=torch.bfloat16
             )
             
             self.model.eval()  # Mode évaluation
@@ -142,10 +154,10 @@ class LLMGenerator:
             # Modèle non supporté par transformers (trop récent)
             raise ValueError(
                 f"\n❌ Le modèle {config.llm_model} n'est pas encore supporté par transformers.\n"
-                f"\n💡 Utilisez un modèle compatible dans .env:\n"
+                f"\n💡 Installez transformers 5.0:\n"
+                f"   pip install transformers>=5.0.0rc0 mistral-common>=1.8.6\n"
+                f"\n   Ou utilisez un modèle compatible:\n"
                 f"   LLM_MODEL=mistralai/Mistral-7B-Instruct-v0.3\n"
-                f"   LLM_MODEL=mistralai/Ministral-8B-Instruct-2410\n"
-                f"   LLM_MODEL=meta-llama/Llama-3.1-8B-Instruct\n"
             ) from e
     
     def _load_cpu(self):
