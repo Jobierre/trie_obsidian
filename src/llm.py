@@ -124,13 +124,29 @@ class LLMGenerator:
                 self.tokenizer = MistralCommonBackend.from_pretrained(config.llm_model)
                 
                 print("🚀 Chargement du modèle Mistral3 (peut prendre quelques minutes)...")
-                self.model = Mistral3ForConditionalGeneration.from_pretrained(
-                    config.llm_model,
-                    torch_dtype=torch.bfloat16,
-                    device_map="auto",
-                    quantization_config=quantization_config,
-                    token=config.hf_token
-                )
+                try:
+                    self.model = Mistral3ForConditionalGeneration.from_pretrained(
+                        config.llm_model,
+                        torch_dtype=torch.bfloat16,
+                        device_map="auto",
+                        quantization_config=quantization_config,
+                        token=config.hf_token,
+                        tie_word_embeddings=False  # Ignore les warnings de conversion
+                    )
+                except RuntimeError as e:
+                    if "no kernel image is available" in str(e):
+                        print("\n⚠️  Erreur CUDA - bitsandbytes incompatible avec votre GPU")
+                        print("Chargement sans quantization (BF16 complet, ~28GB VRAM)...")
+                        # Fallback sans quantization
+                        self.model = Mistral3ForConditionalGeneration.from_pretrained(
+                            config.llm_model,
+                            torch_dtype=torch.bfloat16,
+                            device_map="auto",
+                            token=config.hf_token,
+                            tie_word_embeddings=False
+                        )
+                    else:
+                        raise
                 
                 self._is_ministral3 = True
                 print("✅ Modèle Ministral 3 chargé avec succès")
